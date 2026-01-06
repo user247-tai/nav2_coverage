@@ -1,6 +1,6 @@
 # nav2_coverage
 
-![coverage](https://github.com/user-attachments/assets/8559bd19-8191-4412-a5a8-68620ea7fb31)
+![coverage_full](https://github.com/user-attachments/assets/bb9305a6-9ab7-40eb-8daa-4fc9d34e8b61)
 
 
 ## Overview
