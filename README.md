@@ -21,7 +21,7 @@ When you send a `CoverAllMap` goal, the server will:
 4) Return success when `FollowPath` succeeds, otherwise return the corresponding error
 
 Action definition reference:
-- [CoverAllMap.action](https://github.com/user247-tai/navigation2/blob/68d816af0e38e3f8de87348c29b5cc177a2d5516/nav2_msgs/action/CoverAllMap.action)
+- [CoverAllMap.action](https://github.com/user247-tai/navigation2/blob/tai/kilted/nav2_msgs/action/CoverAllMap.action)
 
 ---
 
@@ -71,15 +71,11 @@ coverage_server:
     debug_path_topic: "/debug/computed_path"
 
     # ---- actions ----
-    cover_action_name: "/cover_all_map"
     compute_action_name: "/compute_path_through_poses"
     follow_action_name: "/follow_path"
 
     # ---- behavior ----
     set_start_from_first_pose: true
-    planner_id: ""
-    controller_id: ""
-    goal_checker_id: ""
 
     # ---- timeouts ----
     wait_grid_timeout_sec: 5.0
@@ -93,19 +89,9 @@ coverage_server:
     # ---- pose generation ----
     grid_step_x: 0.05
     grid_step_y: 0.05
-    downsample_step_x: 0.5
-    downsample_step_y: 0.5
-
-    map_occ_threshold: 50
-    costmap_occ_threshold: 20
     allow_unknown_map: false
     allow_unknown_costmap: false
     skip_outside_costmap: true
-
-    # ---- ordering ----
-    enable_serpentine: true
-    columns_left_to_right: true
-    rows_bottom_to_top: true
 
     # ---- recovery ----
     retries_on_failure: -1   # -1 => infinite retries
