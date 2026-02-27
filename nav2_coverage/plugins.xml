@@ -1,0 +1,7 @@
+<class_libraries>
+    <library path="fullmap_pose_creator">
+        <class type="nav2_coverage::FullmapPoseCreator" base_class_type="nav2_coverage_core::PosesCreator">
+        <description>Creates poses for fullmap coverage</description>
+        </class>
+    </library>
+</class_libraries>
