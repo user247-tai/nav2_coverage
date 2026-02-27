@@ -65,11 +65,13 @@ void FullmapPoseCreator::configure(const rclcpp_lifecycle::LifecycleNode::WeakPt
 
     map_sub_ = node_->create_subscription<nav_msgs::msg::OccupancyGrid>(
         map_topic_, rclcpp::QoS(1).reliable().transient_local(),
-        std::bind(&FullmapPoseCreator::onMapCallback, this, std::placeholders::_1));
+        std::bind(&FullmapPoseCreator::onMapCallback, this, std::placeholders::_1),
+        sub_opts);
 
     costmap_sub_ = node_->create_subscription<nav_msgs::msg::OccupancyGrid>(
         costmap_topic_, rclcpp::QoS(1).reliable().transient_local(),
-        std::bind(&FullmapPoseCreator::onCostmapCallback, this, std::placeholders::_1));
+        std::bind(&FullmapPoseCreator::onCostmapCallback, this, std::placeholders::_1),
+        sub_opts);
 }
 
 void FullmapPoseCreator::onMapCallback(const nav_msgs::msg::OccupancyGrid::SharedPtr msg)
@@ -85,7 +87,8 @@ void FullmapPoseCreator::onCostmapCallback(const nav_msgs::msg::OccupancyGrid::S
 }
 
 bool FullmapPoseCreator::isDataReady() {
-    return map_ != nullptr && costmap_ != nullptr;
+    std::lock_guard<std::mutex> lock(grid_mutex_);
+    return static_cast<bool>(map_) && static_cast<bool>(costmap_);
 }
 
 geometry_msgs::msg::PoseArray FullmapPoseCreator::createPoses(
@@ -98,11 +101,35 @@ geometry_msgs::msg::PoseArray FullmapPoseCreator::createPoses(
     const int map_occ_threshold,
     const int costmap_occ_threshold)
 {
-    const auto map_meta = metaFromGrid(*map_);
-    const auto cost_meta = metaFromGrid(*costmap_);
+    nav_msgs::msg::OccupancyGrid::SharedPtr map;
+    nav_msgs::msg::OccupancyGrid::SharedPtr costmap;
+    {
+        std::lock_guard<std::mutex> lock(grid_mutex_);
+        map = map_;
+        costmap = costmap_;
+    }
+    if (!map || !costmap) {
+        throw std::runtime_error("Map/costmap data not ready");
+    }
 
-    const auto & map_data = map_->data;
-    const auto & cost_data = costmap_->data;
+    const auto map_meta = metaFromGrid(*map);
+    const auto cost_meta = metaFromGrid(*costmap);
+    
+    if (map_meta.resolution <= 0.0 || cost_meta.resolution <= 0.0) {
+        throw std::runtime_error("Invalid occupancy grid: non-positive resolution");
+    }
+
+    const auto & map_data = map->data;
+    const auto & cost_data = costmap->data;
+
+    const size_t map_cells = static_cast<size_t>(map_meta.width) * static_cast<size_t>(map_meta.height);
+    const size_t cost_cells =static_cast<size_t>(cost_meta.width) * static_cast<size_t>(cost_meta.height);
+
+    if (map_meta.width <= 0 || map_meta.height <= 0 || map_data.size() < map_cells ||
+        cost_meta.width <= 0 || cost_meta.height <= 0 || cost_data.size() < cost_cells)
+    {
+        throw std::runtime_error("Invalid occupancy grid: metadata/data size mismatch");
+    }
 
     const int step_x_cells = std::max(1, static_cast<int>(std::lround(grid_step_x_ / map_meta.resolution)));
     const int step_y_cells = std::max(1, static_cast<int>(std::lround(grid_step_y_ / map_meta.resolution)));
@@ -188,12 +215,29 @@ geometry_msgs::msg::PoseArray FullmapPoseCreator::createPoses(
     geometry_msgs::msg::PoseArray out;
     out.header.frame_id = map_meta.frame_id;
 
+    auto mode = order_mode;
+    std::transform(mode.begin(), mode.end(), mode.begin(),
+        [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+
+    if (mode != "columns") {
+        mode = "rows";
+    }
+
     if (!enable_serpentine) {
-        std::sort(nodes.begin(), nodes.end(), [](const auto & a, const auto & b) {
+        std::sort(nodes.begin(), nodes.end(), [&](const auto & a, const auto & b) {
             const int ax = std::get<0>(a), ay = std::get<1>(a);
             const int bx = std::get<0>(b), by = std::get<1>(b);
-            if (ax != bx) return ax < bx;
-            return ay < by;
+            if (mode == "rows") {
+                int primary_a = rows_bottom_to_top ? -ay : ay;
+                int primary_b = rows_bottom_to_top ? -by : by;
+                if (primary_a != primary_b) return primary_a < primary_b;
+                return columns_left_to_right ? (ax < bx) : (ax > bx);
+            } else { // columns
+                int primary_a = columns_left_to_right ? ax : -ax;
+                int primary_b = columns_left_to_right ? bx : -bx;
+                if (primary_a != primary_b) return primary_a < primary_b;
+                return rows_bottom_to_top ? (ay < by) : (ay > by);
+            }
         });
         out.poses.reserve(nodes.size());
         for (const auto & t : nodes) {
@@ -219,7 +263,8 @@ std::vector<geometry_msgs::msg::Pose> FullmapPoseCreator::orderSerpentine(
     std::vector<geometry_msgs::msg::Pose> ordered;
 
     auto mode = order_mode;
-    std::transform(mode.begin(), mode.end(), mode.begin(), ::tolower);
+    std::transform(mode.begin(), mode.end(), mode.begin(),
+        [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
     if (mode != "columns") {
         mode = "rows";
     }
@@ -251,8 +296,8 @@ std::vector<geometry_msgs::msg::Pose> FullmapPoseCreator::orderSerpentine(
                 const int my_b = std::get<1>(b);
                 const int by_a = my_a / std::max(1, dsy_cells);
                 const int by_b = my_b / std::max(1, dsy_cells);
-                if (by_a != by_b) return by_a < by_b;
-                if (my_a != my_b) return my_a < my_b;
+                if (by_a != by_b) return rows_bottom_to_top ? (by_a < by_b) : (by_a > by_b);
+                if (my_a != my_b) return rows_bottom_to_top ? (my_a < my_b) : (my_a > my_b);
                 return std::get<0>(a) < std::get<0>(b);
             });
 
@@ -295,8 +340,8 @@ std::vector<geometry_msgs::msg::Pose> FullmapPoseCreator::orderSerpentine(
             const int mx_b = std::get<0>(b);
             const int bx_a = mx_a / std::max(1, dsx_cells);
             const int bx_b = mx_b / std::max(1, dsx_cells);
-            if (bx_a != bx_b) return bx_a < bx_b;
-            if (mx_a != mx_b) return mx_a < mx_b;
+            if (bx_a != bx_b) return columns_left_to_right ? (bx_a < bx_b) : (bx_a > bx_b);
+            if (mx_a != mx_b) return columns_left_to_right ? (mx_a < mx_b) : (mx_a > mx_b);
             return std::get<1>(a) < std::get<1>(b);
         });
 

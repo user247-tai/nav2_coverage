@@ -24,7 +24,10 @@
 #define NAV2_COVERAGE__UTILS_HPP_
 
 #include <string>
-#include <vector>
+#include <algorithm>
+#include <cctype>
+#include <cmath>
+#include "builtin_interfaces/msg/time.hpp"
 #include "geometry_msgs/msg/pose_stamped.hpp"
 #include "nav_msgs/msg/path.hpp"
 #include "rclcpp/rclcpp.hpp"
@@ -33,7 +36,8 @@ namespace nav2_coverage
 {
 
 inline std::string toLower(std::string s) {
-    std::transform(s.begin(), s.end(), s.begin(), ::tolower);
+    std::transform(s.begin(), s.end(), s.begin(), 
+        [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
     return s;
 }
 
@@ -44,12 +48,19 @@ inline double distXY(const geometry_msgs::msg::PoseStamped & a, const geometry_m
     return std::hypot(dx, dy);
 }
 
-builtin_interfaces::msg::Time toTimeMsg(const rclcpp::Time & t)
+inline builtin_interfaces::msg::Time toTimeMsg(const rclcpp::Time & t)
 {
     builtin_interfaces::msg::Time msg;
     const int64_t ns = t.nanoseconds();
-    msg.sec = static_cast<int32_t>(ns / 1000000000LL);
-    msg.nanosec = static_cast<uint32_t>(ns % 1000000000LL);
+    constexpr int64_t kBillion = 1000000000LL;
+    int64_t sec = ns / kBillion;
+    int64_t nanosec = ns % kBillion;
+    if (nanosec < 0) {
+        --sec;
+        nanosec += kBillion;
+    }
+    msg.sec = static_cast<int32_t>(sec);
+    msg.nanosec = static_cast<uint32_t>(nanosec);
     return msg;
 }
 

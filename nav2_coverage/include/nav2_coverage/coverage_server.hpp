@@ -23,7 +23,6 @@
 #ifndef NAV2_COVERAGE__COVERAGE_SERVER_HPP_
 #define NAV2_COVERAGE__COVERAGE_SERVER_HPP_
 
-#include <atomic>
 #include <chrono>
 #include <condition_variable>
 #include <memory>
@@ -31,6 +30,7 @@
 #include <string>
 #include <thread>
 #include <vector>
+#include <unordered_map>
 
 #include "rclcpp/rclcpp.hpp"
 #include "rclcpp_action/rclcpp_action.hpp"
@@ -47,7 +47,6 @@
 #include "rclcpp/callback_group.hpp"
 #include "pluginlib/class_loader.hpp"
 #include "pluginlib/class_list_macros.hpp"
-#include "nav2_coverage_core/poses_creator.hpp"
 
 namespace nav2_coverage
 {
@@ -73,7 +72,7 @@ protected:
 private:
     // Action goal handling
     template<typename ActionT>
-    void getPreemptedGoalIfRequested(typename std::shared_ptr<const typename ActionT::Goal> goal, const std::unique_ptr<nav2_util::SimpleActionServer<ActionT>> & action_server);
+    void getPreemptedGoalIfRequested(typename std::shared_ptr<const typename ActionT::Goal> & goal, const std::unique_ptr<nav2_util::SimpleActionServer<ActionT>> & action_server);
     
     template<typename ActionT>
     bool checkAndWarnIfCancelled(std::unique_ptr<nav2_util::SimpleActionServer<ActionT>> & action_server);

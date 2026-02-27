@@ -189,7 +189,8 @@ nav2_util::CallbackReturn CoverageServer::on_configure(const rclcpp_lifecycle::S
             return nav2_util::CallbackReturn::FAILURE;
         }
     }
-
+    
+    poses_creator_ids_concat_.clear();
     for (size_t i = 0; i != poses_creator_ids_.size(); i++) {
         poses_creator_ids_concat_ += poses_creator_ids_[i] + std::string(" ");
     }
@@ -317,7 +318,7 @@ void CoverageServer::stopTimer()
 }
 
 template<typename ActionT>
-void CoverageServer::getPreemptedGoalIfRequested(typename std::shared_ptr<const typename ActionT::Goal> goal, const std::unique_ptr<nav2_util::SimpleActionServer<ActionT>> & action_server)
+void CoverageServer::getPreemptedGoalIfRequested(typename std::shared_ptr<const typename ActionT::Goal> & goal, const std::unique_ptr<nav2_util::SimpleActionServer<ActionT>> & action_server)
 {
   if (action_server->is_preempt_requested()) {
     goal = action_server->accept_pending_goal();
@@ -421,11 +422,11 @@ size_t CoverageServer::findNearestIndex(const std::vector<geometry_msgs::msg::Po
     size_t index_offset = 0;
 
     try {
-        if ((action_server_ != nullptr) && (action_server_->get_current_goal())->order_mode == "columns") {
-            index_offset = static_cast<size_t>(std::ceil(1.0 / static_cast<float>(action_server_->get_current_goal()->downsample_step_y)));
-        }
-        else if (action_server_ != nullptr) {
-            index_offset = static_cast<size_t>(std::ceil(1.0 / static_cast<float>(action_server_->get_current_goal()->downsample_step_x)));
+        const auto current_goal = (action_server_ != nullptr) ? action_server_->get_current_goal() : nullptr;
+        if (current_goal) {
+            const float step = (current_goal->order_mode == "columns") ? current_goal->downsample_step_y : current_goal->downsample_step_x;
+            const float safe_step = (step > 0.0f) ? step : 1.0f;
+            index_offset = static_cast<size_t>(std::ceil(1.0f / safe_step));
         }
     } catch(const std::exception & e) {
         stopTimer();
@@ -450,11 +451,13 @@ void CoverageServer::updateRobotPose()
         size_t temp_index = findNearestIndex(goal_list_, pose);
         size_t index_offset = 0;
         
-        if ((action_server_ != nullptr) && (action_server_->get_current_goal()->order_mode == "columns")) {
-            index_offset = static_cast<size_t>(std::ceil(1.0 / static_cast<float>(action_server_->get_current_goal()->downsample_step_y)));
-        }
-        else if (action_server_ != nullptr) {
-            index_offset = static_cast<size_t>(std::ceil(1.0 / static_cast<float>(action_server_->get_current_goal()->downsample_step_x)));
+        if (action_server_ != nullptr) {
+            const auto current_goal = action_server_->get_current_goal();
+            if (current_goal) {
+                const float step = (current_goal->order_mode == "columns") ? current_goal->downsample_step_y : current_goal->downsample_step_x;
+                const float safe_step = (step > 0.0f) ? step : 1.0f;
+                index_offset = static_cast<size_t>(std::ceil(1.0f / safe_step));
+            }
         }
 
         if ((temp_index >= current_index_ + 1) && (temp_index <= current_index_ + index_offset)) {
@@ -514,7 +517,7 @@ void CoverageServer::runPipeline()
         if (findPosesCreatorId(pc_name, current_poses_creator)) {
             current_poses_creator_ = current_poses_creator;
         } else {
-            throw nav2_coverage_core::CoverageException("Failed to find progress checker name: " + pc_name);
+            throw nav2_coverage_core::CoverageException("Failed to find poses creator name: " + pc_name);
         }
 
         if (!waitForData(poses_timeout_sec_)) {
@@ -771,10 +774,11 @@ bool CoverageServer::coverMap(geometry_msgs::msg::PoseArray poses)
     if (follow_wrapped.code != rclcpp_action::ResultCode::SUCCEEDED) {
         bool success_recovered = false;
 
-        while(retries_on_failure_ != 0 || retries_on_failure_ == -1) {
+        int retries_remaining = retries_on_failure_;
+        while (retries_remaining == -1 || retries_remaining > 0) {
             bool continue_flag = false;
-            if (retries_on_failure_ > 0) { 
-                retries_on_failure_--; 
+            if (retries_remaining > 0) {
+                --retries_remaining; 
             }
 
             feedback->status_code = Action::Feedback::RECOVERING;
@@ -783,8 +787,16 @@ bool CoverageServer::coverMap(geometry_msgs::msg::PoseArray poses)
             geometry_msgs::msg::PoseStamped current_robot_pose;
             if (costmap_ros_->getRobotPose(current_robot_pose)) {
                 // Create new path from current position to remaining goals
+                std::vector<geometry_msgs::msg::PoseStamped> goals_snapshot;
+                size_t current_index_snapshot = 0;
+                {
+                    std::lock_guard<std::mutex> lk(goal_list_mutex_);
+                    goals_snapshot = goal_list_;
+                    current_index_snapshot = current_index_;
+                }
+
                 std::vector<geometry_msgs::msg::PoseStamped> remaining_goal_list;
-                remaining_goal_list.reserve(goal_list_.size() - current_index_ + 1);
+                remaining_goal_list.reserve(goals_snapshot.size() > current_index_snapshot ? (goals_snapshot.size() - current_index_snapshot + 1) : 1);
                 remaining_goal_list.push_back(current_robot_pose);
                 
                 std::unique_lock<nav2_costmap_2d::Costmap2D::mutex_t> lock(*(costmap_->getMutex()));
@@ -792,24 +804,24 @@ bool CoverageServer::coverMap(geometry_msgs::msg::PoseArray poses)
                 unsigned int my = 0;
                 bool use_radius = costmap_ros_->getUseRadius();
                 
-                for (size_t i = current_index_ + 1; i < goal_list_.size(); ++i) {
+                for (size_t i = current_index_snapshot + 1; i < goals_snapshot.size(); ++i) {
                     unsigned int cost = nav2_costmap_2d::FREE_SPACE;
                     if (use_radius) {
-                        if (costmap_->worldToMap(goal_list_[i].pose.position.x, goal_list_[i].pose.position.y, mx, my)) {
+                        if (costmap_->worldToMap(goals_snapshot[i].pose.position.x, goals_snapshot[i].pose.position.y, mx, my)) {
                             cost = costmap_->getCost(mx, my);
                         } else {
                             cost = nav2_costmap_2d::LETHAL_OBSTACLE;
                         }
                     } else {
                         nav2_costmap_2d::Footprint footprint = costmap_ros_->getRobotFootprint();
-                        auto theta = tf2::getYaw(goal_list_[i].pose.orientation);
+                        auto theta = tf2::getYaw(goals_snapshot[i].pose.orientation);
                         cost = static_cast<unsigned int>(collision_checker_->footprintCostAtPose(
-                        goal_list_[i].pose.position.x, goal_list_[i].pose.position.y, theta, footprint));
+                        goals_snapshot[i].pose.position.x, goals_snapshot[i].pose.position.y, theta, footprint));
                     }
                     if (cost >= static_cast<unsigned int>(recovery_obstacle_max_cost_)) {
                         continue;
                     } else {
-                        remaining_goal_list.push_back(goal_list_[i]);
+                        remaining_goal_list.push_back(goals_snapshot[i]);
                     }
                 }
 

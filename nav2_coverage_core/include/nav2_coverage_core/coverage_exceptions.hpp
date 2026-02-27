@@ -24,6 +24,7 @@
 #define NAV2_COVERAGE_CORE__COVERAGE_EXCEPTIONS_HPP_
 
 #include <stdexcept>
+#include <string>
 
 namespace nav2_coverage_core
 {

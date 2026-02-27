@@ -40,6 +40,7 @@
 #include "nav2_coverage_msgs/action/cover_map.hpp"
 #include "rclcpp_action/rclcpp_action.hpp"
 #include <cmath>
+#include <memory>
 
 using CoverAllMap = nav2_coverage_msgs::action::CoverMap;
 using GoalHandleCoverAllMap = rclcpp_action::ServerGoalHandle<CoverAllMap>;
@@ -116,6 +117,9 @@ public:
     virtual bool isDataReady() = 0;
 
     inline bool worldToGrid(double wx, double wy, const GridMeta & meta, int & mx, int & my) {
+        if (meta.resolution <= 0.0 || meta.width <= 0 || meta.height <= 0) {
+            return false;
+        }
         mx = static_cast<int>(std::floor((wx - meta.origin_x) / meta.resolution));
         my = static_cast<int>(std::floor((wy - meta.origin_y) / meta.resolution));
         if (mx < 0 || my < 0 || mx >= meta.width || my >= meta.height) {
