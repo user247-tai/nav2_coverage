@@ -20,6 +20,8 @@ find_package(pluginlib REQUIRED)
 find_package(lifecycle_msgs REQUIRED)
 find_package(rclcpp_lifecycle REQUIRED)
 find_package(tf2_ros REQUIRED)
+find_package(rcl_interfaces REQUIRED)
+find_package(rclcpp_components REQUIRED)
 
 nav2_package()
 
@@ -115,12 +117,14 @@ ament_export_libraries(${library_name})
 ament_export_dependencies(
   geometry_msgs
   nav_msgs
+  nav2_coverage_msgs
   nav2_coverage_core
   nav2_costmap_2d
   nav2_msgs
   nav2_util
   pluginlib
   rclcpp
+  rclcpp_action
   rclcpp_lifecycle
   rcl_interfaces
   tf2_ros
