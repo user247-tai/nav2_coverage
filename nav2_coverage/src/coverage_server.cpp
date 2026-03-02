@@ -472,7 +472,7 @@ bool CoverageServer::waitForData(double timeout_sec)
     rclcpp::Rate r(20.0);
 
     while (rclcpp::ok()) {
-        if (checkAndWarnIfCancelled(action_server_) || checkAndWarnIfPreempted(action_server_)) {
+        if (!action_server_->is_server_active() || checkAndWarnIfCancelled(action_server_) || checkAndWarnIfPreempted(action_server_)) {
             RCLCPP_INFO(get_logger(), "Action server preempt/cancel requested. Stopping.");
             return false;
         }
@@ -656,7 +656,7 @@ bool CoverageServer::coverMap(geometry_msgs::msg::PoseArray poses)
     {
         const auto start_t = now();
         while (rclcpp::ok()) {
-            if (checkAndWarnIfCancelled(action_server_) || checkAndWarnIfPreempted(action_server_)) {
+            if (!action_server_->is_server_active() || checkAndWarnIfCancelled(action_server_) || checkAndWarnIfPreempted(action_server_)) {
                 return false;
             }
             if (compute_goal_future.wait_for(std::chrono::milliseconds(100)) == std::future_status::ready) {
@@ -677,7 +677,7 @@ bool CoverageServer::coverMap(geometry_msgs::msg::PoseArray poses)
     {
         const auto start_t = now();
         while (rclcpp::ok()) {
-            if (checkAndWarnIfCancelled(action_server_) || checkAndWarnIfPreempted(action_server_)) {
+            if (!action_server_->is_server_active() || checkAndWarnIfCancelled(action_server_) || checkAndWarnIfPreempted(action_server_)) {
                 compute_client_->async_cancel_goal(compute_goal_handle);
                 return false;
             }
@@ -733,7 +733,7 @@ bool CoverageServer::coverMap(geometry_msgs::msg::PoseArray poses)
     {
         const auto start_t = now();
         while (rclcpp::ok()) {
-            if (checkAndWarnIfCancelled(action_server_) || checkAndWarnIfPreempted(action_server_)) {
+            if (!action_server_->is_server_active() || checkAndWarnIfCancelled(action_server_) || checkAndWarnIfPreempted(action_server_)) {
                 return false;
             }
             if (follow_goal_future.wait_for(std::chrono::milliseconds(100)) == std::future_status::ready) {
@@ -754,7 +754,7 @@ bool CoverageServer::coverMap(geometry_msgs::msg::PoseArray poses)
     {
         const auto start_t = now();
         while (rclcpp::ok()) {
-            if (checkAndWarnIfCancelled(action_server_) || checkAndWarnIfPreempted(action_server_)) {
+            if (!action_server_->is_server_active() || checkAndWarnIfCancelled(action_server_) || checkAndWarnIfPreempted(action_server_)) {
                 follow_client_->async_cancel_goal(follow_goal_handle);
                 return false;
             }
@@ -776,6 +776,10 @@ bool CoverageServer::coverMap(geometry_msgs::msg::PoseArray poses)
 
         int retries_remaining = retries_on_failure_;
         while (retries_remaining == -1 || retries_remaining > 0) {
+            if (!action_server_->is_server_active()) {
+                return false;
+            }
+
             bool continue_flag = false;
             if (retries_remaining > 0) {
                 --retries_remaining; 
@@ -866,7 +870,7 @@ bool CoverageServer::coverMap(geometry_msgs::msg::PoseArray poses)
                 {
                     const auto start_t = now();
                     while (rclcpp::ok()) {
-                        if (checkAndWarnIfCancelled(action_server_) || checkAndWarnIfPreempted(action_server_)) {
+                        if (!action_server_->is_server_active() || checkAndWarnIfCancelled(action_server_) || checkAndWarnIfPreempted(action_server_)) {
                             return false;
                         }
                         if (recovery_compute_goal_future.wait_for(std::chrono::milliseconds(100)) == std::future_status::ready) {
@@ -893,7 +897,7 @@ bool CoverageServer::coverMap(geometry_msgs::msg::PoseArray poses)
                 {
                 const auto start_t = now();
                 while (rclcpp::ok()) {
-                    if (checkAndWarnIfCancelled(action_server_) || checkAndWarnIfPreempted(action_server_)) {
+                    if (!action_server_->is_server_active() || checkAndWarnIfCancelled(action_server_) || checkAndWarnIfPreempted(action_server_)) {
                         compute_client_->async_cancel_goal(recovery_compute_goal_handle);
                         return false;
                     }
@@ -950,7 +954,7 @@ bool CoverageServer::coverMap(geometry_msgs::msg::PoseArray poses)
                 {
                     const auto start_t = now();
                     while (rclcpp::ok()) {
-                        if (checkAndWarnIfCancelled(action_server_) || checkAndWarnIfPreempted(action_server_)) {
+                        if (!action_server_->is_server_active() || checkAndWarnIfCancelled(action_server_) || checkAndWarnIfPreempted(action_server_)) {
                             return false;
                         }
                         if (recovery_follow_goal_future.wait_for(std::chrono::milliseconds(100)) == std::future_status::ready) {
@@ -977,7 +981,7 @@ bool CoverageServer::coverMap(geometry_msgs::msg::PoseArray poses)
                 {
                     const auto start_t = now();
                     while (rclcpp::ok()) {
-                        if (checkAndWarnIfCancelled(action_server_) || checkAndWarnIfPreempted(action_server_)) {
+                        if (!action_server_->is_server_active() || checkAndWarnIfCancelled(action_server_) || checkAndWarnIfPreempted(action_server_)) {
                             follow_client_->async_cancel_goal(recovery_follow_goal_handle);
                             return false;
                         }
