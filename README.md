@@ -2,109 +2,106 @@
 
 ![coverage_full](https://github.com/user-attachments/assets/bb9305a6-9ab7-40eb-8daa-4fc9d34e8b61)
 
-
 ## Overview
-`nav2_coverage` (Nav2 Coverage Server) is a Nav2 server that aims to replace
-[opennav_coverage](https://github.com/open-navigation/opennav_coverage) by providing a
-simple **“cover the whole map”** workflow using existing Nav2 servers:
+`nav2_coverage` is a Nav2 server that provides a simple **“cover the map while avoiding obstacles”** workflow by reusing existing Nav2 servers:
 
-- **Planner Server**: plan using `nav2_msgs/action/ComputePathThroughPoses`
-- **Controller Server**: execute using `nav2_msgs/action/FollowPath`
+- **Planner Server**: plans a path with `nav2_msgs/action/ComputePathThroughPoses`
+- **Controller Server**: executes the path with `nav2_msgs/action/FollowPath`
 
 `nav2_coverage` exposes a single action server:
-- `nav2_msgs/action/CoverAllMap`
 
-When you send a `CoverAllMap` goal, the server will:
-1) Create coverage poses from `/map` + `/global_costmap/costmap`  
-2) Call **ComputePathThroughPoses** to generate a coverage path  
-3) Call **FollowPath** to execute the computed path  
-4) Return success when `FollowPath` succeeds, otherwise return the corresponding error
+- `nav2_coverage_msgs/action/CoverMap`
 
-Action definition reference:
-- [CoverAllMap.action](https://github.com/user247-tai/navigation2/blob/tai/kilted/nav2_msgs/action/CoverAllMap.action)
+When a `CoverMap` goal is sent, the server will:
+
+1. Generate coverage poses using a configured pose-creator plugin
+2. Call **ComputePathThroughPoses** to build a coverage path
+3. Call **FollowPath** to execute the generated path
+4. Return success if execution completes successfully; otherwise, run recovery and retry until the retry limit is reached, then return the corresponding error
 
 ---
 
 ## How it works
 
-### 1) Coverage poses creation
-Coverage poses are generated from `OccupancyGrid` sources:
-- `map_topic` (usually `/map`)
-- `costmap_topic` (usually `/global_costmap/costmap`)
+```mermaid
+sequenceDiagram
+    participant Client as Goal Client
+    participant Server as CoverageServer
+    participant Creator as PosesCreator Plugin
+    participant Compute as ComputePath Action
+    participant Follow as FollowPath Action
 
-Cells are filtered using occupancy thresholds and unknown-space rules, then downsampled
-by binning to produce a dense but manageable set of candidate poses.
+    Client->>Server: Send CoverMap goal
+    Server->>Creator: Select plugin and request PoseArray
+    Creator->>Creator: Wait for map/costmap and generate PoseArray
+    Creator-->>Server: Return PoseArray
+    Server->>Compute: Send ComputePathThroughPoses goal
+    Compute-->>Server: Return planned path
+    Server->>Server: Downsample and publish debug path
+    Server->>Follow: Send FollowPath goal
+    Follow-->>Server: Succeed / Fail
 
-### 2) Ordering (rows / columns)
-When `enable_serpentine=true`, poses are ordered in a “lawnmower / boustrophedon” style:
-- Odd group keeps direction
-- Even group reverses direction
-
-This reduces unnecessary turning and deadhead travel.
-
-### 3) Planning and execution
-- `ComputePathThroughPoses` produces a global path visiting the coverage poses
-- The path can be downsampled (`downsample_keep_every_n` or `downsample_min_dist`)
-- `FollowPath` executes the final path
+    alt Follow succeeds
+        Server->>Client: Return SUCCESS
+    else Follow fails
+        Server->>Compute: Replan using trimmed goals (recovery)
+        Compute-->>Server: Return updated path
+        Server->>Follow: Retry FollowPath
+        Follow-->>Server: Final result
+        Server->>Client: Return final result
+    end
+```
 
 ---
 
 ## Debug topics
-`nav2_coverage` publishes debug outputs (latched) for visualization:
+`nav2_coverage` publishes latched debug topics for visualization:
 
 - `graph_nodes_topic` (`geometry_msgs/PoseArray`): generated coverage poses
-- `debug_path_topic` (`nav_msgs/Path`): computed (optionally downsampled) path
+- `debug_path_topic` (`nav_msgs/Path`): computed path, optionally downsampled
 
 ---
 
 ## Configuration
 
-### Coverage server parameters (example)
+### Example coverage server parameters
 ```yaml
 coverage_server:
   ros__parameters:
-    # ---- topics ----
-    map_topic: "/map"
-    costmap_topic: "/global_costmap/costmap"
-
     graph_nodes_topic: "/graph_nodes"
     debug_path_topic: "/debug/computed_path"
-
-    # ---- actions ----
     compute_action_name: "/compute_path_through_poses"
     follow_action_name: "/follow_path"
-
-    # ---- behavior ----
     set_start_from_first_pose: true
-
-    # ---- timeouts ----
-    wait_grid_timeout_sec: 5.0
+    poses_timeout_sec: 5.0
     compute_timeout_sec: 30.0
-    follow_timeout_sec: 0.0   # 0 => no timeout
-
-    # ---- downsample computed path ----
+    follow_timeout_sec: 0.0   # 0 = no timeout
     downsample_keep_every_n: 0
     downsample_min_dist: 0.0
+    retries_on_failure: -1    # -1 = infinite retries
+    poses_creator_plugins: ["poses_creator"]
 
-    # ---- pose generation ----
-    grid_step_x: 0.05
-    grid_step_y: 0.05
-    allow_unknown_map: false
-    allow_unknown_costmap: false
-    skip_outside_costmap: true
-
-    # ---- recovery ----
-    retries_on_failure: -1   # -1 => infinite retries
+    poses_creator:
+      plugin: "nav2_coverage::FullmapPoseCreator"
+      map_topic: "map"
+      costmap_topic: "/global_costmap/costmap"
+      grid_step_x: 0.05
+      grid_step_y: 0.05
+      allow_unknown_map: false
+      allow_unknown_costmap: false
+      skip_outside_costmap: true
 ```
 
 ---
 
 ## Recommended Nav2 configuration
 This server works best with:
-- **Planner** that produces clean pose-to-pose paths (NavFn, Smac 2D)
-- **Controller** that tracks paths strictly (Regulated Pure Pursuit, Graceful Controller)
 
-Example:
+- A **planner** that generates clean pose-to-pose paths, such as **NavFn** or **Smac 2D**
+- A **controller** that follows paths closely, such as **Regulated Pure Pursuit** or **Graceful Controller**
+
+Example configuration:
+
 ```yaml
 planner_server:
   ros__parameters:
@@ -168,14 +165,16 @@ controller_server:
       v_angular_min_in_place: 0.25
       slowdown_radius: 0.25
 ```
+
 ---
 
 ## Compatibility
 This package has been built and tested with:
-- [Nav2 Kilted branch](https://github.com/ros-navigation/navigation2/tree/kilted) (main branch)
+
+- [Nav2 Kilted branch](https://github.com/ros-navigation/navigation2/tree/kilted)
 
 ---
 
 ## License
 - **Original Author**: user247-tai
-- License: MIT License
+- **License**: MIT
