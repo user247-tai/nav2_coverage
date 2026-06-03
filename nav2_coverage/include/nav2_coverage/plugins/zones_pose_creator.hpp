@@ -26,11 +26,13 @@
 #include <string>
 #include <memory>
 #include <vector>
+#include <tuple>
 #include <unordered_map>
 #include <unordered_set>
 #include <queue>
 #include <climits>
 #include <numeric>
+#include <mutex>
 #include "nav2_coverage_core/poses_creator.hpp"
 #include "geometry_msgs/msg/pose_array.hpp"
 #include "rclcpp/callback_group.hpp"
@@ -46,6 +48,7 @@ struct ZoneRegion
   int zone_id{0};
   int region_index{0};
   std::vector<std::tuple<int, int, geometry_msgs::msg::Pose>> nodes;
+  std::size_t raw_count{0};  // number of cells before sampling/filtering
   double centroid_x{0.0};
   double centroid_y{0.0};
 };

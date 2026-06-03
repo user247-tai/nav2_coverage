@@ -22,6 +22,8 @@
 
 #include "nav2_coverage/plugins/zones_pose_creator.hpp"
 #include "nav2_util/node_utils.hpp"
+#include <algorithm>
+#include <cctype>
 #include <cmath>
 
 namespace nav2_coverage
@@ -191,8 +193,8 @@ std::vector<ZoneRegion> ZonesPoseCreator::extractByZoneId(
       bool is_zone = false;
       int zone_id = 0;
       if (binary_mode) {
-        is_zone = (raw != 0);
-        zone_id = 1;  // all non-zero cells share the same zone in by_id mode
+        is_zone = (raw > 0) || (raw == -1);  // accept positive values and uint8 255 (-1 in int8)
+        zone_id = 1;  // all valid non-zero cells share the same zone in by_id mode
       } else {
         zone_id = static_cast<int>(raw);
         is_zone = (zone_id > 0);
@@ -219,6 +221,7 @@ std::vector<ZoneRegion> ZonesPoseCreator::extractByZoneId(
       p.orientation.w = 1.0;
 
       zone_map[zone_id].nodes.emplace_back(x, y, p);
+      zone_map[zone_id].raw_count++;
     }
   }
 
@@ -270,8 +273,8 @@ std::vector<ZoneRegion> ZonesPoseCreator::runConnectedComponentLabeling(
       int expected_value = 0;
 
       if (binary_mode) {
-        is_zone = (raw != 0);
-        expected_value = 0;  // dummy; in binary mode we only check != 0
+        is_zone = (raw > 0) || (raw == -1);  // accept positive values and uint8 255 (-1 in int8)
+        expected_value = 0;  // dummy; in binary mode we only check validity
       } else {
         expected_value = static_cast<int>(raw);
         is_zone = (expected_value > 0);
@@ -330,7 +333,7 @@ std::vector<ZoneRegion> ZonesPoseCreator::runConnectedComponentLabeling(
           int8_t nraw = zones_map.data[nidx];
           bool neighbor_is_zone = false;
           if (binary_mode) {
-            neighbor_is_zone = (nraw != 0);
+            neighbor_is_zone = (nraw > 0) || (nraw == -1);
           } else {
             neighbor_is_zone = (nraw == expected_value);
           }
@@ -349,6 +352,7 @@ std::vector<ZoneRegion> ZonesPoseCreator::runConnectedComponentLabeling(
         region.centroid_y = meta.origin_y +
           (static_cast<double>(sum_y) / count + 0.5) * meta.resolution;
       }
+      region.raw_count = static_cast<std::size_t>(count);
 
       regions.push_back(std::move(region));
     }
@@ -725,11 +729,19 @@ geometry_msgs::msg::PoseArray ZonesPoseCreator::createPoses(
   for (int region_idx : order_indices) {
     auto & region = regions[region_idx];
 
-    if (static_cast<int>(region.nodes.size()) < min_zone_cells_) {
+    if (static_cast<int>(region.raw_count) < min_zone_cells_) {
       RCLCPP_DEBUG(
         node_->get_logger(),
-        "Skipping zone %d region %d with only %zu valid cells (min=%d)",
-        region.zone_id, region.region_index, region.nodes.size(), min_zone_cells_);
+        "Skipping zone %d region %d with only %zu raw cells (min=%d)",
+        region.zone_id, region.region_index, region.raw_count, min_zone_cells_);
+      continue;
+    }
+
+    if (region.nodes.empty()) {
+      RCLCPP_DEBUG(
+        node_->get_logger(),
+        "Skipping zone %d region %d: no valid poses after filtering",
+        region.zone_id, region.region_index);
       continue;
     }
 
