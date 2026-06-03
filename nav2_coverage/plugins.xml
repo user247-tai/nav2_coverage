@@ -4,4 +4,9 @@
         <description>Creates poses for fullmap coverage</description>
         </class>
     </library>
+    <library path="zones_pose_creator">
+        <class type="nav2_coverage::ZonesPoseCreator" base_class_type="nav2_coverage_core::PosesCreator">
+        <description>Creates poses for zone-based coverage with id-based or connected-component grouping, and configurable zone ordering</description>
+        </class>
+    </library>
 </class_libraries>
