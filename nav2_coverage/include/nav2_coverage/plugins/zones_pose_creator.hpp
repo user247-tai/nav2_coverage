@@ -35,6 +35,7 @@
 #include <mutex>
 #include "nav2_coverage_core/poses_creator.hpp"
 #include "geometry_msgs/msg/pose_array.hpp"
+#include "geometry_msgs/msg/pose_stamped.hpp"
 #include "rclcpp/callback_group.hpp"
 #include "tf2_ros/buffer.h"
 #include "tf2_ros/transform_listener.h"
