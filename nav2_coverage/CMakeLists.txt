@@ -76,6 +76,7 @@ target_link_libraries(${executable_name} PRIVATE
 rclcpp_components_register_nodes(${library_name} "nav2_coverage::CoverageServer")
 
 add_library(fullmap_pose_creator SHARED plugins/fullmap_pose_creator.cpp)
+add_library(zones_pose_creator SHARED plugins/zones_pose_creator.cpp)
 target_include_directories(fullmap_pose_creator
   PUBLIC
     "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
@@ -93,9 +94,27 @@ target_link_libraries(fullmap_pose_creator PRIVATE
   pluginlib::pluginlib
 )
 
+target_include_directories(zones_pose_creator
+  PUBLIC
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
+    "$<INSTALL_INTERFACE:include/${PROJECT_NAME}>"
+)
+target_link_libraries(zones_pose_creator PUBLIC
+  ${geometry_msgs_TARGETS}
+  nav2_coverage_core::nav2_coverage_core
+  rclcpp::rclcpp
+  rclcpp_lifecycle::rclcpp_lifecycle
+  ${rcl_interfaces_TARGETS}
+  tf2_ros::tf2_ros
+)
+target_link_libraries(zones_pose_creator PRIVATE
+  nav2_util::nav2_util_core
+  pluginlib::pluginlib
+)
+
 pluginlib_export_plugin_description_file(nav2_coverage_core plugins.xml)
 
-install(TARGETS fullmap_pose_creator ${library_name}
+install(TARGETS fullmap_pose_creator zones_pose_creator ${library_name}
   EXPORT ${library_name}
   ARCHIVE DESTINATION lib
   LIBRARY DESTINATION lib

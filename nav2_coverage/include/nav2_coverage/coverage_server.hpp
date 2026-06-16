@@ -86,13 +86,15 @@ private:
     bool coverMap(geometry_msgs::msg::PoseArray poses);
 
     // Helpers
-    size_t findNearestIndex(const std::vector<geometry_msgs::msg::PoseStamped> & goals, const geometry_msgs::msg::PoseStamped & robot_pose);
-    
     bool waitForData(double timeout_sec);
     
     nav_msgs::msg::Path downsamplePath(const nav_msgs::msg::Path & in) const;
     
     bool findPosesCreatorId(const std::string & c_name, std::string & name);
+
+    size_t advanceCurrentIndexFromRobotPose(const geometry_msgs::msg::PoseStamped & robot_pose);
+
+    double getGoalReachDistance() const;
     
     void stopTimer();
 
