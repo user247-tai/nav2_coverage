@@ -25,6 +25,7 @@
 #include "nav2_coverage_core/coverage_exceptions.hpp"
 #include "lifecycle_msgs/msg/state.hpp"
 #include "nav2_util/node_utils.hpp"
+#include <algorithm>
 
 namespace nav2_coverage
 {
@@ -404,65 +405,46 @@ nav_msgs::msg::Path CoverageServer::downsamplePath(const nav_msgs::msg::Path & i
     return out;
 }
 
-size_t CoverageServer::findNearestIndex(const std::vector<geometry_msgs::msg::PoseStamped> & goals, const geometry_msgs::msg::PoseStamped & robot_pose)
+double CoverageServer::getGoalReachDistance() const
 {
-    size_t best_i = 0;
-    double best_d = std::numeric_limits<double>::infinity();
-
-    for (size_t i = 0; i < goals.size(); ++i) {
-        const double dx = goals[i].pose.position.x - robot_pose.pose.position.x;
-        const double dy = goals[i].pose.position.y - robot_pose.pose.position.y;
-        const double d = std::hypot(dx, dy);
-        if (d < best_d) {
-            best_d = d;
-            best_i = i;
-        }
+    constexpr double kMinGoalReachDistance = 0.10;
+    if (!costmap_) {
+        return kMinGoalReachDistance;
     }
 
-    size_t index_offset = 0;
+    return std::max(kMinGoalReachDistance, 1.5 * costmap_->getResolution());
+}
 
-    try {
-        const auto current_goal = (action_server_ != nullptr) ? action_server_->get_current_goal() : nullptr;
-        if (current_goal) {
-            const float step = (current_goal->order_mode == "columns") ? current_goal->downsample_step_y : current_goal->downsample_step_x;
-            const float safe_step = (step > 0.0f) ? step : 1.0f;
-            index_offset = static_cast<size_t>(std::ceil(1.0f / safe_step));
-        }
-    } catch(const std::exception & e) {
-        stopTimer();
-        RCLCPP_ERROR(this->get_logger(), "Unexpected error in findNearestIndex: %s", e.what());
-    } 
-
-
-    if ((best_i >= current_index_ + 1) && (best_i <= current_index_ + index_offset)) {
-        return best_i;
+size_t CoverageServer::advanceCurrentIndexFromRobotPose(
+  const geometry_msgs::msg::PoseStamped & robot_pose)
+{
+    std::lock_guard<std::mutex> lk(goal_list_mutex_);
+    if (goal_list_.empty() || current_index_ >= goal_list_.size()) {
+        return current_index_;
     }
+
+    const double reach_distance = getGoalReachDistance();
+
+    while (current_index_ + 1 < goal_list_.size()) {
+        const auto & next_goal = goal_list_[current_index_ + 1];
+        if (distXY(next_goal, robot_pose) > reach_distance) {
+            break;
+        }
+        ++current_index_;
+    }
+
     return current_index_;
 }
 
 void CoverageServer::updateRobotPose()
 {
-    std::lock_guard<std::mutex> lk(goal_list_mutex_);
-    if (!costmap_ros_ || (goal_list_.empty())) {
+    if (!costmap_ros_) {
         return;
     }
+
     geometry_msgs::msg::PoseStamped pose;
     if (costmap_ros_->getRobotPose(pose)) {
-        size_t temp_index = findNearestIndex(goal_list_, pose);
-        size_t index_offset = 0;
-        
-        if (action_server_ != nullptr) {
-            const auto current_goal = action_server_->get_current_goal();
-            if (current_goal) {
-                const float step = (current_goal->order_mode == "columns") ? current_goal->downsample_step_y : current_goal->downsample_step_x;
-                const float safe_step = (step > 0.0f) ? step : 1.0f;
-                index_offset = static_cast<size_t>(std::ceil(1.0f / safe_step));
-            }
-        }
-
-        if ((temp_index >= current_index_ + 1) && (temp_index <= current_index_ + index_offset)) {
-            current_index_ = temp_index;
-        }
+        (void)advanceCurrentIndexFromRobotPose(pose);
     }
 }
 
@@ -790,6 +772,8 @@ bool CoverageServer::coverMap(geometry_msgs::msg::PoseArray poses)
 
             geometry_msgs::msg::PoseStamped current_robot_pose;
             if (costmap_ros_->getRobotPose(current_robot_pose)) {
+                (void)advanceCurrentIndexFromRobotPose(current_robot_pose);
+
                 // Create new path from current position to remaining goals
                 std::vector<geometry_msgs::msg::PoseStamped> goals_snapshot;
                 size_t current_index_snapshot = 0;
@@ -1022,4 +1006,3 @@ bool CoverageServer::coverMap(geometry_msgs::msg::PoseArray poses)
 
 #include "rclcpp_components/register_node_macro.hpp"
 RCLCPP_COMPONENTS_REGISTER_NODE(nav2_coverage::CoverageServer)
-
